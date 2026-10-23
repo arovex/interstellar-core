@@ -24,7 +24,9 @@ Minimal - No UI, buttons, or overlays, just the animation
 [View the animation here](https://arovex.github.io/interstellar-core/blackhole.html)
 
 3. Open locally
+
 Use the Live Server extension in VS Code (right-click blackhole.html → "Open with Live Server"). Live Server is recommended for best WebGL performance.
 
 4. Usage
+
 Drag with mouse/touch to orbit around the black hole. Use the scroll wheel (or pinch on mobile) to zoom in and out.
