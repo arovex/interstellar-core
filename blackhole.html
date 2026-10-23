@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Gargantua</title>
+<style>
+  html, body {
+    width: 100dvw;
+    height: 100dvh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #000;
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
+  }
+  #c {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100dvw;
+    height: 100dvh;
+    cursor: default;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script id="vert" type="x-shader/x-vertex">
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+  vUv = aPos * 0.5 + 0.5;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+</script>
+
+<script id="scene" type="x-shader/x-fragment">
+precision highp float;
+
+varying vec2 vUv;
+uniform vec2  uRes;
+uniform float uTime;
+uniform vec3  uCamPos;
+uniform mat3  uCam;
+
+#define PI  3.141592653589793
+#define TAU 6.283185307179586
+
+float hash11(float p) {
+  p = fract(p * 0.1031);
+  p *= p + 33.33;
+  p *= p + p;
+  return fract(p);
+}
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 hash33(vec3 p3) {
+  p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yxz + 33.33);
+  return fract((p3.xxy + p3.yxx) * p3.zyx);
+}
+
+float noise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash12(i);
+  float b = hash12(i + vec2(1.0, 0.0));
+  float c = hash12(i + vec2(0.0, 1.0));
+  float d = hash12(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float fbm2(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  mat2 rot = mat2(0.80, -0.60, 0.60, 0.80);
+  for (int i = 0; i < 5; i++) {
+    v += a * noise2(p);
+    p = rot * p * 2.03 + 17.17;
+    a *= 0.5;
+  }
+  return v;
+}
+
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash11(dot(i + vec3(0.0, 0.0, 0.0), vec3(1.0, 57.0, 113.0)));
+  float n100 = hash11(dot(i + vec3(1.0, 0.0, 0.0), vec3(1.0, 57.0, 113.0)));
+  float n010 = hash11(dot(i + vec3(0.0, 1.0, 0.0), vec3(1.0, 57.0, 113.0)));
+  float n110 = hash11(dot(i + vec3(1.0, 1.0, 0.0), vec3(1.0, 57.0, 113.0)));
+  float n001 = hash11(dot(i + vec3(0.0, 0.0, 1.0), vec3(1.0, 57.0, 113.0)));
+  float n101 = hash11(dot(i + vec3(1.0, 0.0, 1.0), vec3(1.0, 57.0, 113.0)));
+  float n011 = hash11(dot(i + vec3(0.0, 1.0, 1.0), vec3(1.0, 57.0, 113.0)));
+  float n111 = hash11(dot(i + vec3(1.0, 1.0, 1.0), vec3(1.0, 57.0, 113.0)));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+    f.z
+  );
+}
+
+float fbm3(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += a * noise3(p);
+    p = p * 2.02 + vec3(7.3, 3.1, 11.7);
+    a *= 0.5;
+  }
+  return v;
+}
+
+/* One layer of round, twinkling stars. */
+float starLayer(vec3 dir, float scale, float chance, float size, float seed, out vec3 tint) {
+  vec3 p = dir * scale + seed;
+  vec3 id = floor(p);
+  vec3 f = fract(p) - 0.5;
+  vec3 r = hash33(id + seed * 0.731);
+
+  tint = mix(vec3(0.58, 0.70, 1.00), vec3(1.00, 0.84, 0.64), r.y);
+  tint = mix(tint, vec3(1.00, 0.50, 0.34), step(0.93, r.z) * 0.65);
+
+  float present = step(chance, r.x);
+  vec3 offset = (hash33(id + seed * 2.17) - 0.5) * 0.62;
+  float d = length(f - offset);
+  float core = smoothstep(size, 0.0, d);
+  float glow = 0.12 / (1.0 + 520.0 * d * d);
+  float twinkle = 0.62 + 0.38 * sin(uTime * (0.9 + r.y * 2.2) + r.z * 43.0);
+  return present * (core + glow) * twinkle;
+}
+
+/* The sky itself: a luminous, dusty Milky Way and three depths of stars. */
+vec3 sky(vec3 dir) {
+  dir = normalize(dir);
+
+  /* Milky Way band, tilted so it crosses the frame diagonally. */
+  vec3 galacticNormal = normalize(vec3(0.36, 0.76, 0.23));
+  float lat = dot(dir, galacticNormal);
+
+  float wide  = exp(-lat * lat / 0.095);
+  float band  = exp(-lat * lat / 0.030);
+  float core  = exp(-lat * lat / 0.0085);
+
+  vec3 q = dir * 3.25;
+  float cloud  = fbm3(q + vec3(2.7, 8.1, 1.4));
+  float fine   = fbm3(q * 3.1 + vec3(8.0, 1.0, 5.0));
+  float dust   = fbm3(dir * 8.5 + vec3(11.0, 4.0, 7.0));
+  float dust2  = fbm3(dir * 16.0 + vec3(3.0, 9.0, 1.0));
+
+  float bulgeDir = max(dot(dir, normalize(vec3(-0.63, 0.18, -0.75))), 0.0);
+  float bulge = pow(bulgeDir, 26.0);
+  float bulgeGlow = pow(bulgeDir, 5.0) * 0.26;
+
+  float clouds = smoothstep(0.27, 0.80, cloud * 0.72 + fine * 0.42);
+  float bandShape = wide * 0.16 + band * 0.62 + core * 0.40 + bulge * 1.35 + bulgeGlow;
+  bandShape *= 0.48 + 0.92 * clouds;
+
+  /* Dark rifts running through the bright galactic plane. */
+  float rifts = smoothstep(0.29, 0.67, dust) * smoothstep(0.22, 0.83, dust2);
+  rifts *= smoothstep(0.05, 0.25, band + wide * 0.45);
+  bandShape *= 1.0 - rifts * 0.88;
+
+  vec3 bandColor = mix(vec3(0.20, 0.26, 0.46), vec3(1.00, 0.86, 0.64), band + core * 0.85);
+  bandColor = mix(bandColor, vec3(1.00, 0.66, 0.39), core * 0.42 + bulge * 0.52);
+  bandColor += vec3(0.26, 0.34, 0.62) * wide * 0.30;
+  bandColor += vec3(0.82, 0.18, 0.22) * clouds * core * 0.26;
+
+  vec3 color = bandColor * bandShape * 0.88;
+
+  /* A whisper of cold intergalactic nebula. */
+  float veil = fbm3(dir * 1.45 + vec3(1.0, 7.0, 3.0));
+  color += vec3(0.020, 0.032, 0.070) * smoothstep(0.42, 0.88, veil);
+
+  /* Stars: a few big foreground ones, then finer and finer dust. */
+  vec3 tint;
+  float s1 = starLayer(dir, 42.0, 0.916, 0.120, 11.0, tint);
+  color += tint * s1 * 2.35;
+
+  float s2 = starLayer(dir, 83.0, 0.938, 0.105, 37.0, tint);
+  color += tint * s2 * 1.35;
+
+  float s3 = starLayer(dir, 158.0, 0.953, 0.095, 73.0, tint);
+  color += tint * s3 * 0.72;
+
+  float s4 = starLayer(dir, 315.0, 0.968, 0.090, 131.0, tint);
+  color += tint * s4 * 0.34;
+
+  /* Extra star dust concentrated in the galactic band. */
+  float bandStars = starLayer(dir + galacticNormal * 0.013, 205.0, 0.952, 0.105, 181.0, tint);
+  color += tint * bandStars * (0.35 + wide * 1.3);
+
+  return color;
+}
+
+/* A handful of meteors, living in world space so they move with the galaxy. */
+vec3 meteors(vec3 dir, float time) {
+  vec3 result = vec3(0.0);
+
+  for (int i = 0; i < 14; i++) {
+    float seed = float(i) * 19.73 + 3.17;
+    float cycle = 5.0 + hash11(seed + 0.3) * 9.0;
+    float local = fract(time / cycle + hash11(seed + 1.1));
+
+    /* Meteors are only briefly visible in each cycle. */
+    float life = 0.135;
+    if (local > life) continue;
+
+    float phase = local / life;
+    float ease = phase * phase * (3.0 - 2.0 * phase);
+
+    /* Spawn them across the hemisphere in front of the default view,
+       so there is always something falling through the galaxy. */
+    float az = (hash11(seed + 2.0) - 0.5) * 2.6;
+    float el = (hash11(seed + 3.0) - 0.5) * 1.35;
+    vec3 a = normalize(vec3(
+      sin(az) * cos(el),
+      sin(el),
+      -cos(az) * cos(el)
+    ));
+    vec3 side = normalize(cross(a, vec3(0.0, 1.0, 0.0) + vec3(0.11, 0.0, 0.07)));
+    vec3 b = normalize(a + side * (0.14 + hash11(seed + 5.0) * 0.26));
+
+    vec3 head = normalize(mix(a, b, ease));
+    vec3 tangent = normalize(b - a * dot(a, b));
+
+    vec3 delta = dir - head;
+    float along = dot(delta, tangent);
+    float perp = length(delta - tangent * along);
+    float tailLen = 0.012 + hash11(seed + 6.0) * 0.045;
+    float width = 0.00075 + hash11(seed + 7.0) * 0.0007;
+
+    float streak = exp(-perp * perp / (width * width));
+    float tail = clamp(-along / tailLen, 0.0, 1.0);
+    float tailFade = (1.0 - smoothstep(0.72, 1.0, tail)) * pow(1.0 - tail, 1.8);
+    streak *= tailFade * step(along, 0.0);
+
+    float headGlow = exp(-dot(delta, delta) / (width * width * 13.0));
+    streak += headGlow * 1.8;
+
+    float bright = (0.055 + 0.95 * hash11(seed + 8.0));
+    vec3 meteorColor = mix(vec3(0.70, 0.86, 1.0), vec3(1.0, 0.78, 0.50), hash11(seed + 9.0));
+    result += meteorColor * streak * bright;
+  }
+
+  return result;
+}
+
+float diskDensity(float r, float angle, float time) {
+  float omega = 0.78 / pow(max(r, 2.4), 1.5);
+  float a = angle - time * omega;
+
+  /* Rotating polar coordinates keep the pattern seamless around the disk. */
+  vec2 p = vec2(cos(a), sin(a)) * r;
+
+  float n1 = fbm2(p * 0.92 + vec2(2.7, 5.1));
+  float n2 = fbm2(p * 2.31 + vec2(8.2, 1.9));
+  float n3 = noise2(p * 5.8 + vec2(time * 0.015, 0.0));
+
+  float density = n1 * 0.63 + n2 * 0.37 + n3 * 0.14;
+  density = smoothstep(0.23, 0.82, density);
+
+  /* Fine concentric filament structure. */
+  float rings = 0.76 + 0.24 * sin(r * 8.5 - time * 0.42 + n2 * 9.0);
+  density *= rings;
+
+  return clamp(density, 0.0, 1.0);
+}
+
+vec3 shadeDisk(vec3 hit, vec3 rayDir, out float alpha) {
+  float r = length(hit.xz);
+  float angle = atan(hit.z, hit.x);
+
+  float inner = smoothstep(2.95, 3.55, r);
+  float outer = 1.0 - smoothstep(9.4, 12.4, r);
+  float edge = inner * outer;
+
+  float den = diskDensity(r, angle, uTime);
+  float profile = pow(3.25 / max(r, 3.25), 2.15);
+
+  /* Relativistic beaming: one side of the disk is much brighter. */
+  float beta = clamp(sqrt(0.52 / max(r, 2.65)), 0.0, 0.72);
+  vec3 orbit = normalize(vec3(-hit.z, 0.0, hit.x));
+  float mu = dot(orbit, -normalize(rayDir));
+  float doppler = pow(max(1.0 - beta * mu, 0.12), -2.15);
+  float gravity = sqrt(max(0.18, 1.0 - 1.0 / max(r, 1.01)));
+
+  float t = clamp((r - 3.0) / 9.0, 0.0, 1.0);
+  vec3 hot  = vec3(1.00, 0.97, 0.90);
+  vec3 warm = vec3(1.00, 0.61, 0.22);
+  vec3 red  = vec3(0.79, 0.20, 0.045);
+  vec3 col = mix(hot, warm, smoothstep(0.0, 0.35, t));
+  col = mix(col, red, smoothstep(0.38, 1.0, t));
+
+  /* Hot inner rim and turbulent bright knots. */
+  float rim = exp(-pow((r - 3.42) / 0.48, 2.0));
+  col += vec3(1.0, 0.78, 0.54) * rim * 0.9;
+  float knots = smoothstep(0.52, 0.98, den) * (0.35 + 0.65 * rim);
+  col *= 0.62 + 0.62 * den + knots * 0.75;
+
+  vec3 blueShift = vec3(0.80, 0.92, 1.25);
+  col = mix(col, col * blueShift, smoothstep(-0.2, 0.85, mu) * 0.52);
+
+  float intensity = edge * profile * den * doppler * gravity * 2.55;
+  intensity += edge * profile * rim * 0.75;
+
+  alpha = clamp(edge * (0.52 + den * 0.55), 0.0, 0.97);
+  return col * intensity;
+}
+
+/* Null-geodesic acceleration for a Schwarzschild black hole (rs = 1). */
+vec3 lensAccel(vec3 p, float h2) {
+  float r2 = dot(p, p);
+  float invR = inversesqrt(r2);
+  float invR2 = invR * invR;
+  return -1.50 * h2 * p * invR2 * invR2 * invR;
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+
+  vec3 ray = normalize(uCam * vec3(uv, 1.16));
+  vec3 pos = uCamPos;
+  vec3 vel = ray;
+
+  vec3 hvec = cross(pos, vel);
+  float h2 = dot(hvec, hvec);
+
+  vec3 color = vec3(0.0);
+  float trans = 1.0;
+  bool captured = false;
+
+  for (int i = 0; i < 190; i++) {
+    float r2 = dot(pos, pos);
+    float r = sqrt(r2);
+
+    if (r < 1.005) {
+      captured = true;
+      break;
+    }
+    if (r > 42.0 && dot(pos, vel) > 0.0) break;
+
+    float dt = clamp(0.048 * r, 0.010, 0.62);
+
+    vec3 acc0 = lensAccel(pos, h2);
+    vec3 next = pos + vel * dt + 0.5 * acc0 * dt * dt;
+    vec3 acc1 = lensAccel(next, h2);
+    vel += 0.5 * (acc0 + acc1) * dt;
+
+    /* The thin accretion disk lies in the y = 0 plane. */
+    if (pos.y * next.y < 0.0) {
+      float f = pos.y / (pos.y - next.y);
+      vec3 hit = mix(pos, next, f);
+      float rr = length(hit.xz);
+      if (rr > 2.85 && rr < 12.6) {
+        float a;
+        vec3 emitted = shadeDisk(hit, normalize(vel), a);
+        color += trans * emitted;
+        trans *= 1.0 - a;
+        if (trans < 0.018) break;
+      }
+    }
+
+    pos = next;
+  }
+
+  /* What lies beyond the gravitational lens. */
+  if (!captured && trans > 0.004) {
+    vec3 d = normalize(vel);
+    vec3 backdrop = sky(d);
+    backdrop += meteors(d, uTime);
+    color += backdrop * trans;
+  }
+
+  /* The razor-thin photon ring at the critical impact parameter. */
+  float b = length(hvec);
+  float ring = exp(-pow((b - 2.598) / 0.021, 2.0));
+  float ringHalo = exp(-pow((b - 2.598) / 0.17, 2.0));
+  color += vec3(1.0, 0.80, 0.58) * (ring * 1.75 + ringHalo * 0.12) * (0.18 + trans * 0.82);
+
+  /* Subtle warm corona just outside the shadow. */
+  float corona = exp(-pow((b - 3.15) / 0.52, 2.0));
+  color += vec3(0.55, 0.20, 0.07) * corona * 0.09;
+
+  /* Very faint blue haze so the void never looks like dead pixels. */
+  color += vec3(0.0035, 0.0060, 0.0130);
+
+  gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
+}
+</script>
+
+<script id="bright" type="x-shader/x-fragment">
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform float uThreshold;
+void main() {
+  vec3 c = texture2D(uScene, vUv).rgb;
+  float l = max(c.r, max(c.g, c.b));
+  float k = max(l - uThreshold, 0.0) / max(l, 0.0001);
+  gl_FragColor = vec4(c * k, 1.0);
+}
+</script>
+
+<script id="blur" type="x-shader/x-fragment">
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main() {
+  vec3 c = texture2D(uTex, vUv).rgb * 0.227027;
+  c += texture2D(uTex, vUv + uDir * 1.384615).rgb * 0.316216;
+  c += texture2D(uTex, vUv - uDir * 1.384615).rgb * 0.316216;
+  c += texture2D(uTex, vUv + uDir * 3.230769).rgb * 0.070270;
+  c += texture2D(uTex, vUv - uDir * 3.230769).rgb * 0.070270;
+  gl_FragColor = vec4(c, 1.0);
+}
+</script>
+
+<script id="composite" type="x-shader/x-fragment">
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2 uRes;
+uniform float uTime;
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 aces(vec3 x) {
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 centered = uv - 0.5;
+
+  /* Barely-there chromatic aberration at the edges of the lens. */
+  float ca = dot(centered, centered) * 0.0014;
+  vec3 scene;
+  scene.r = texture2D(uScene, uv + centered * ca).r;
+  scene.g = texture2D(uScene, uv).g;
+  scene.b = texture2D(uScene, uv - centered * ca).b;
+
+  vec3 bloom = texture2D(uBloom, uv).rgb;
+
+  vec3 col = scene + bloom * 1.18;
+  col *= 1.18;
+
+  /* Film-like highlight rolloff. */
+  col = aces(col);
+  col = pow(col, vec3(1.0 / 2.2));
+
+  /* Gentle vignette, like a very fast lens. */
+  float vig = smoothstep(0.90, 0.18, length(centered * vec2(1.04, 1.0)) * 1.38);
+  col *= 0.34 + vig * 0.66;
+
+  /* Fine grain keeps the dark areas alive. */
+  float grain = hash12(gl_FragCoord.xy + fract(uTime) * 431.7) - 0.5;
+  col += grain * 0.009;
+
+  /* A soft blue-black lift rather than crushed black. */
+  col += vec3(0.0010, 0.0016, 0.0030);
+
+  gl_FragColor = vec4(max(col, vec3(0.0)), 1.0);
+}
+</script>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('c');
+  const gl = canvas.getContext('webgl', {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    preserveDrawingBuffer: false,
+    powerPreference: 'high-performance'
+  });
+
+  if (!gl) {
+    document.body.style.background = '#000';
+    return;
+  }
+
+  const vertexSource = document.getElementById('vert').textContent;
+  const sceneSource = document.getElementById('scene').textContent;
+  const brightSource = document.getElementById('bright').textContent;
+  const blurSource = document.getElementById('blur').textContent;
+  const compositeSource = document.getElementById('composite').textContent;
+
+  function compile(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  function program(fragmentSource) {
+    const vs = compile(gl.VERTEX_SHADER, vertexSource);
+    const fs = compile(gl.FRAGMENT_SHADER, fragmentSource);
+    if (!vs || !fs) return null;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(p));
+      gl.deleteProgram(p);
+      return null;
+    }
+    return p;
+  }
+
+  const sceneProgram = program(sceneSource);
+  const brightProgram = program(brightSource);
+  const blurProgram = program(blurSource);
+  const compositeProgram = program(compositeSource);
+  if (!sceneProgram || !brightProgram || !blurProgram || !compositeProgram) return;
+
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,  1, -1,  -1, 1,  1, 1
+  ]), gl.STATIC_DRAW);
+
+  function bindQuad(p) {
+    gl.useProgram(p);
+    const loc = gl.getAttribLocation(p, 'aPos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  /* ---------- render targets ---------- */
+
+  function makeTarget(w, h) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    return { tex, fbo, w, h };
+  }
+
+  function destroyTarget(t) {
+    if (!t) return;
+    gl.deleteTexture(t.tex);
+    gl.deleteFramebuffer(t.fbo);
+  }
+
+  let sceneTarget = null;
+  let bloomA = null;
+  let bloomB = null;
+  let cssW = 1;
+  let cssH = 1;
+  let sceneW = 1;
+  let sceneH = 1;
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, window.innerWidth < 640 ? 1.0 : 1.4);
+    cssW = Math.max(1, Math.floor(window.innerWidth * dpr));
+    cssH = Math.max(1, Math.floor(window.innerHeight * dpr));
+
+    canvas.width = cssW;
+    canvas.height = cssH;
+
+    /* The geodesic pass is intentionally resolution-independent: bloom,
+       grain and filmic rolloff hide the scale while keeping it fast. */
+    const pixelBudget = window.innerWidth < 640 ? 900_000 : 1_700_000;
+    const scale = Math.min(1.0, Math.sqrt(pixelBudget / (cssW * cssH)));
+    sceneW = Math.max(2, Math.floor(cssW * scale));
+    sceneH = Math.max(2, Math.floor(cssH * scale));
+
+    destroyTarget(sceneTarget);
+    destroyTarget(bloomA);
+    destroyTarget(bloomB);
+
+    sceneTarget = makeTarget(sceneW, sceneH);
+    const bw = Math.max(2, Math.floor(sceneW / 4));
+    const bh = Math.max(2, Math.floor(sceneH / 4));
+    bloomA = makeTarget(bw, bh);
+    bloomB = makeTarget(bw, bh);
+
+    gl.viewport(0, 0, cssW, cssH);
+  }
+
+  window.addEventListener('resize', resize, { passive: true });
+  resize();
+
+  /* ---------- right-drag navigation ---------- */
+
+  const state = {
+    yaw: 0.0,
+    pitch: 0.135,
+    targetYaw: 0.0,
+    targetPitch: 0.135,
+    velYaw: 0.00012,
+    velPitch: 0.0,
+    dragging: false,
+    lastX: 0,
+    lastY: 0,
+    lastT: 0
+  };
+
+  const PITCH_MIN = -0.72;
+  const PITCH_MAX = 1.08;
+
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  /* Mouse wheel zooms the camera in/out (affects the galaxy view). */
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY * 0.012;
+    const next = dist + delta;
+    dist = Math.max(distMin, Math.min(distMax, next));
+  }, { passive: false });
+
+  /* One/two finger drag rotates, right-drag rotates, left-drag rotates (mobile friendly). */
+  canvas.addEventListener('pointerdown', (e) => {
+    const isMouse = e.pointerType === 'mouse';
+    if (isMouse && e.button !== 0 && e.button !== 2) return;
+
+    e.preventDefault();
+    state.dragging = true;
+    state.lastX = e.clientX;
+    state.lastY = e.clientY;
+    state.lastT = performance.now();
+    state.velYaw = 0;
+    state.velPitch = 0;
+
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!state.dragging) return;
+    e.preventDefault();
+
+    const now = performance.now();
+    const dt = Math.max(8, now - state.lastT);
+    const dx = e.clientX - state.lastX;
+    const dy = e.clientY - state.lastY;
+
+    const isMouse = e.pointerType === 'mouse';
+    const sx = isMouse ? 0.0040 : 0.0030;
+    const sy = isMouse ? 0.0029 : 0.0022;
+
+    state.targetYaw -= dx * sx;
+    state.targetPitch = clamp(state.targetPitch + dy * sy, PITCH_MIN, PITCH_MAX);
+
+    state.velYaw = (-dx * sx) * 0.28 / dt;
+    state.velPitch = (dy * sy) * 0.28 / dt;
+
+    state.lastX = e.clientX;
+    state.lastY = e.clientY;
+    state.lastT = now;
+  });
+
+  function releaseDrag(e) {
+    if (!state.dragging) return;
+    state.dragging = false;
+    if (e && e.pointerId !== undefined) {
+      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+  }
+
+  canvas.addEventListener('pointerup', releaseDrag);
+  canvas.addEventListener('pointercancel', releaseDrag);
+  window.addEventListener('blur', () => releaseDrag(null));
+
+  /* ---------- camera ---------- */
+
+  let dist = 16.6;
+  const distMin = 11.0;
+  const distMax = 28.0;
+  const camPos = new Float32Array(3);
+  const camBasis = new Float32Array(9);
+
+  function updateCamera(dt) {
+    if (!state.dragging) {
+      state.targetYaw += state.velYaw * dt * 60.0;
+      state.targetPitch += state.velPitch * dt * 60.0;
+      const damp = Math.exp(-dt * 3.4);
+      state.velYaw *= damp;
+      state.velPitch *= damp;
+
+      /* A very slow, almost imperceptible drift when idle. */
+      state.targetYaw += dt * 0.0065;
+      state.targetPitch = clamp(state.targetPitch, PITCH_MIN, PITCH_MAX);
+    }
+
+    const follow = 1.0 - Math.exp(-dt * 12.0);
+    state.yaw += (state.targetYaw - state.yaw) * follow;
+    state.pitch += (state.targetPitch - state.pitch) * follow;
+
+    const cp = Math.cos(state.pitch);
+    const sp = Math.sin(state.pitch);
+    const sy = Math.sin(state.yaw);
+    const cy = Math.cos(state.yaw);
+
+    /* Camera orbits the hole; the galaxy wheels behind it. */
+    camPos[0] = dist * cp * sy;
+    camPos[1] = dist * sp;
+    camPos[2] = dist * cp * cy;
+
+    const fx = -camPos[0] / dist;
+    const fy = -camPos[1] / dist;
+    const fz = -camPos[2] / dist;
+
+    /* right = normalize(cross(forward, worldUp)) */
+    let rx = -fz;
+    let rz = fx;
+    const rl = Math.hypot(rx, rz) || 1.0;
+    rx /= rl;
+    rz /= rl;
+
+    /* up = cross(right, forward) */
+    const ux = -rz * fy;
+    const uy = rz * fx - rx * fz;
+    const uz = rx * fy;
+
+    camBasis[0] = rx;  camBasis[1] = 0.0; camBasis[2] = rz;
+    camBasis[3] = ux;  camBasis[4] = uy;  camBasis[5] = uz;
+    camBasis[6] = fx;  camBasis[7] = fy;  camBasis[8] = fz;
+  }
+
+  /* ---------- uniforms ---------- */
+
+  const su = {
+    res: gl.getUniformLocation(sceneProgram, 'uRes'),
+    time: gl.getUniformLocation(sceneProgram, 'uTime'),
+    camPos: gl.getUniformLocation(sceneProgram, 'uCamPos'),
+    cam: gl.getUniformLocation(sceneProgram, 'uCam')
+  };
+
+  const bu = {
+    scene: gl.getUniformLocation(brightProgram, 'uScene'),
+    threshold: gl.getUniformLocation(brightProgram, 'uThreshold')
+  };
+
+  const blu = {
+    tex: gl.getUniformLocation(blurProgram, 'uTex'),
+    dir: gl.getUniformLocation(blurProgram, 'uDir')
+  };
+
+  const cu = {
+    scene: gl.getUniformLocation(compositeProgram, 'uScene'),
+    bloom: gl.getUniformLocation(compositeProgram, 'uBloom'),
+    res: gl.getUniformLocation(compositeProgram, 'uRes'),
+    time: gl.getUniformLocation(compositeProgram, 'uTime')
+  };
+
+  /* ---------- frame loop ---------- */
+
+  let last = performance.now();
+  let start = last;
+
+  function drawFullscreen() {
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function blurPass(source, target, dx, dy) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.viewport(0, 0, target.w, target.h);
+    bindQuad(blurProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, source.tex);
+    gl.uniform1i(blu.tex, 0);
+    gl.uniform2f(blu.dir, dx / target.w, dy / target.h);
+    drawFullscreen();
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+    last = now;
+    const time = (now - start) / 1000;
+
+    updateCamera(dt);
+
+    /* Scene into an offscreen buffer. */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneTarget.fbo);
+    gl.viewport(0, 0, sceneTarget.w, sceneTarget.h);
+    bindQuad(sceneProgram);
+    gl.uniform2f(su.res, sceneTarget.w, sceneTarget.h);
+    gl.uniform1f(su.time, time);
+    gl.uniform3fv(su.camPos, camPos);
+    gl.uniformMatrix3fv(su.cam, false, camBasis);
+    drawFullscreen();
+
+    /* Bright pass at quarter resolution. */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA.fbo);
+    gl.viewport(0, 0, bloomA.w, bloomA.h);
+    bindQuad(brightProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sceneTarget.tex);
+    gl.uniform1i(bu.scene, 0);
+    gl.uniform1f(bu.threshold, 0.54);
+    drawFullscreen();
+
+    /* Two ping-pong Gaussian passes. */
+    blurPass(bloomA, bloomB, 1.0, 0.0);
+    blurPass(bloomB, bloomA, 0.0, 1.0);
+    blurPass(bloomA, bloomB, 2.4, 0.0);
+    blurPass(bloomB, bloomA, 0.0, 2.4);
+
+    /* Final grade onto the screen. */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cssW, cssH);
+    bindQuad(compositeProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sceneTarget.tex);
+    gl.uniform1i(cu.scene, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, bloomA.tex);
+    gl.uniform1i(cu.bloom, 1);
+    gl.uniform2f(cu.res, cssW, cssH);
+    gl.uniform1f(cu.time, time);
+    drawFullscreen();
+
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
