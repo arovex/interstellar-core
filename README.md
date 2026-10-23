@@ -20,7 +20,7 @@ Minimal - No UI, buttons, or overlays, just the animation
    git clone https://github.com/arovex/interstellar-core.git
 
 2. Run locally
-Open blackhole.html directly in your browser (double-click it), or
+(https://arovex.github.io/interstellar-core/blackhole.html) or
 Use the Live Server extension in VS Code (right-click blackhole.html → "Open with Live Server"). Live Server is recommended for best WebGL performance.
 
 3. Usage
