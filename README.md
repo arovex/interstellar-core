@@ -30,3 +30,7 @@ Use the Live Server extension in VS Code (right-click blackhole.html → "Open w
 4. Usage
 
 Drag with mouse/touch to orbit around the black hole. Use the scroll wheel (or pinch on mobile) to zoom in and out.
+
+## License
+
+MIT License
