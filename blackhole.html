@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Gargantua</title>
 <style>
   html, body {
@@ -656,25 +656,61 @@ void main() {
     dist = Math.max(distMin, Math.min(distMax, next));
   }, { passive: false });
 
-  /* One/two finger drag rotates, right-drag rotates, left-drag rotates (mobile friendly). */
+  /* Track every touch/mouse pointer so we can tell a drag from a pinch. */
+  const pointers = new Map();
+  let pinchDistance = 0;
+
+  function pointerDistance() {
+    const pts = Array.from(pointers.values());
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+
+  /* One finger / right-click drag rotates, two fingers pinch to zoom. */
   canvas.addEventListener('pointerdown', (e) => {
     const isMouse = e.pointerType === 'mouse';
     if (isMouse && e.button !== 0 && e.button !== 2) return;
 
     e.preventDefault();
-    state.dragging = true;
-    state.lastX = e.clientX;
-    state.lastY = e.clientY;
-    state.lastT = performance.now();
-    state.velYaw = 0;
-    state.velPitch = 0;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+
+    if (pointers.size === 1) {
+      state.dragging = true;
+      state.lastX = e.clientX;
+      state.lastY = e.clientY;
+      state.lastT = performance.now();
+      state.velYaw = 0;
+      state.velPitch = 0;
+      pinchDistance = 0;
+    } else {
+      /* A second finger started a pinch; stop rotating until one lifts. */
+      state.dragging = false;
+      state.velYaw = 0;
+      state.velPitch = 0;
+      pinchDistance = pointerDistance();
+    }
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!state.dragging) return;
+    if (!pointers.has(e.pointerId)) return;
     e.preventDefault();
+
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.size >= 2) {
+      const d = pointerDistance();
+      if (pinchDistance > 0 && d > 0) {
+        /* Fingers apart = zoom in (move the camera closer). */
+        dist = clamp(dist * (pinchDistance / d), distMin, distMax);
+      }
+      pinchDistance = d;
+      state.dragging = false;
+      return;
+    }
+
+    if (!state.dragging) return;
 
     const now = performance.now();
     const dt = Math.max(8, now - state.lastT);
@@ -697,16 +733,39 @@ void main() {
   });
 
   function releaseDrag(e) {
-    if (!state.dragging) return;
-    state.dragging = false;
     if (e && e.pointerId !== undefined) {
+      pointers.delete(e.pointerId);
       try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    if (pointers.size === 1) {
+      /* One finger is still down: let it keep rotating without a jump. */
+      const remaining = pointers.values().next().value;
+      state.dragging = true;
+      state.lastX = remaining.x;
+      state.lastY = remaining.y;
+      state.lastT = performance.now();
+      state.velYaw = 0;
+      state.velPitch = 0;
+      pinchDistance = 0;
+    } else {
+      state.dragging = false;
+      pinchDistance = 0;
     }
   }
 
   canvas.addEventListener('pointerup', releaseDrag);
   canvas.addEventListener('pointercancel', releaseDrag);
-  window.addEventListener('blur', () => releaseDrag(null));
+  window.addEventListener('blur', () => {
+    pointers.clear();
+    state.dragging = false;
+    pinchDistance = 0;
+  });
+
+  /* Stop Safari's page-level pinch gesture from hijacking the animation. */
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('gesturechange', (e) => e.preventDefault());
+  document.addEventListener('gestureend', (e) => e.preventDefault());
 
   /* ---------- camera ---------- */
 
