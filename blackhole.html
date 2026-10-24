@@ -769,9 +769,12 @@ void main() {
 
   /* ---------- camera ---------- */
 
-  let dist = 16.6;
-  const distMin = 11.0;
-  const distMax = 28.0;
+  /* Portrait phones have a much narrower field of view, so pull the camera
+     back further there to keep the black hole comfortably framed. */
+  const compactView = window.innerWidth < 640;
+  let dist = compactView ? 50.0 : 19.0;
+  const distMin = compactView ? 18.0 : 11.0;
+  const distMax = compactView ? 72.0 : 32.0;
   const camPos = new Float32Array(3);
   const camBasis = new Float32Array(9);
 
